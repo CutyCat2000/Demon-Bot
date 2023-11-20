@@ -64,14 +64,13 @@ async def ticketsystem_setup_command(interaction, name: str, panel :discord.Text
     await interaction.followup.send(embed = embed)
     return
   isStaff = False
+  member = interaction.guild.get_member(interaction.user.id)
   if str(interaction.guild.id) in staff:
-    member = interaction.guild.get_member(interaction.user.id)
-    if member.guild_permissions.administrator:
-      isStaff = True
-    else:
-      for role in member.roles:
-        if role.id in staff["moderator"] or role.id in staff["manager"]:
-          isStaff = True
+    for role in member.roles:
+      if role.id in staff["moderator"] or role.id in staff["manager"]:
+        isStaff = True
+  if member.guild_permissions.administrator or member.id == interaction.guild.owner.id:
+    isStaff = True
   if not isStaff:
     embed = discord.Embed(title="Ticket system", description="You don't have permission to use this command!", color = embed_color_error)
     await interaction.followup.send(embed = embed)
@@ -170,7 +169,7 @@ async def ticketsystem_resend_command(interaction, name: str, channel: discord.T
   isStaff = False
   if str(interaction.guild.id) in staff:
     member = interaction.guild.get_member(interaction.user.id)
-    if member.guild_permissions.administrator:
+    if member.guild_permissions.administrator or member.id == interaction.guild.owner.id:
       isStaff = True
     else:
       for role in member.roles:
@@ -234,7 +233,7 @@ async def ticketsystem_delete_command(interaction, name: str):
   isStaff = False
   if str(interaction.guild.id) in staff:
     member = interaction.guild.get_member(interaction.user.id)
-    if member.guild_permissions.administrator:
+    if member.guild_permissions.administrator or member.id == interaction.guild.owner.id:
       isStaff = True
     else:
       for role in member.roles:
@@ -345,7 +344,7 @@ async def on_interaction(interaction):
       except:
         pass
       for role in member.roles:
-        if role.id in moderator_roles or role.id in manager_roles or member.guild_permissions.administrator or member.id == userid:
+        if role.id in moderator_roles or role.id in manager_roles or member.guild_permissions.administrator or member.id == interaction.guild.owner.id or member.id == userid:
           # Do you really want to close this ticket? this can't be undone. (do with on_interaction and client.wait_for)
           embed = discord.Embed(title = "Are you sure?", description = "Are you sure you want to close this ticket?", color = embed_color_warning)
           view = ui.View()
