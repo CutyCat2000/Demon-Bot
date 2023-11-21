@@ -2,7 +2,7 @@ import discord
 from discord import ui, app_commands
 import json
 from discord.ext.commands.converter import PartialMessageConverter
-from config import embed_color_warning, embed_color, embed_color_error, embed_color_premium, embed_color_success, TOKEN
+from config import embed_color_warning, embed_color, embed_color_error, embed_color_premium, embed_color_success, TOKEN, channel_for_tickets
 import chat_exporter
 import io
 import asyncio
@@ -13,7 +13,7 @@ import asyncio
 class Client(discord.Client):
   def __init__(self):
     intents = discord.Intents.all()
-    activity = discord.CustomActivity("I am Demon")
+    activity = discord.CustomActivity("Look at me!")
     super().__init__(intents=intents, activity=activity)
     self.tree = app_commands.CommandTree(self)
   async def on_ready(self):
@@ -365,7 +365,7 @@ async def on_interaction(interaction):
               for guild in client.guilds:
                 if guild.id == 1173641101542969444:
                   for channel in guild.channels:
-                    if channel.id == 1176242232098037850:
+                    if channel.id == channel_for_tickets:
                       message = await channel.send(file = transcript_file)
               link = await chat_exporter.link(message)
             msg = await interaction.followup.send(content = "Ticket will be closed in 5 seconds", ephemeral = True)
