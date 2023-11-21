@@ -1,12 +1,2 @@
 {
-    "1173641101542969444-hilfe": {
-        "name": "hilfe",
-        "guild_id": 1173641101542969444,
-        "category_id": 1174144778707947581,
-        "message_id": null,
-        "description": "This is the ticket support of {server}.",
-        "title": "{server} Support",
-        "welcome_message": "Thanks for contacting {server} support.\nWe will be here for you shortly.",
-        "button_label": "\ud83c\udf9f\ufe0f Create a Ticket"
-    }
 }
