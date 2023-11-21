@@ -2,10 +2,14 @@ import discord
 from discord import ui, app_commands
 import json
 from discord.ext.commands.converter import PartialMessageConverter
-from config import embed_color_warning, embed_color, embed_color_error, embed_color_premium, embed_color_success, TOKEN, channel_for_tickets
+from config import *
 import chat_exporter
 import io
 import asyncio
+import threading
+from webserver import app
+import canvacord
+import random
 
 
 
@@ -24,7 +28,20 @@ class Client(discord.Client):
     ticketsystem.add_command(app_commands.Command(name = "setup", description="Setup the ticket system", callback = ticketsystem_setup_command))
     ticketsystem.add_command(app_commands.Command(name = "resend", description="Send a specific ticket panel again", callback = ticketsystem_resend_command))
     ticketsystem.add_command(app_commands.Command(name = "delete", description="Delete a specific ticket panel", callback = ticketsystem_delete_command))
+    
     self.tree.add_command(ticketsystem)
+
+    xpsystem = app_commands.Group(name='xp', description='XP/Leveling commands')
+    xpsystem.add_command(app_commands.Command(name = "setup", description = "Setup the xp/leveling system", callback = xpsystemsetup))
+    xpsystem.add_command(app_commands.Command(name = 'rank', description = "Get your current rank card", callback = xpsystemrankcard))
+    xpsystem.add_command(app_commands.Command(name = 'leaderboard', description = 'Display the current xp/leveling leaderboard', callback = xpsystemleaderboard))
+
+    self.tree.add_command(xpsystem)
+
+    # test = app_commands.Group(name='test', description='Currently in test')
+    # test.add_command(app_commands.Command(name = 'rank', description = 'Display your rank card', callback = testRankCard))
+    
+    # self.tree.add_command(test)
 
 client = Client()
 
@@ -427,9 +444,162 @@ async def on_interaction(interaction):
       await interaction.response.defer(ephemeral= True)
       await interaction.message.delete()
       await interaction.followup.send(content = "Ticket deletion cancelled", ephemeral = True)
-      
+
+@client.event
+async def on_message(message):
+  if message.author.id == client.user.id:
+    return
+  if message.guild:
+    try:
+      xpsettings = json.loads(open('xpranks/'+str(message.guild.id) + '-settings.json', 'r').read())
+    except Exception as es:
+      print(es)
+      xpsettings = None
+    if xpsettings:
+      if xpsettings['enabled']:
+        try:
+          serverxp = json.loads(open('xpranks/'+str(message.guild.id)+'-users.json', 'r').read())
+        except:
+          serverxp = {}
+        if not str(message.author.id) in serverxp.keys():
+          serverxp[str(message.author.id)] = {
+            "currentxp": 0,
+            "currentlevel": 1,
+          }
+        serverxp[str(message.author.id)]["currentxp"] += xpsettings["xppermessage"]
+        neededxp = xpsettings["firstlevelxp"] + (serverxp[str(message.author.id)]["currentlevel"] - 1) * xpsettings["xplevelincrement"]
+        json.dump(serverxp, open('xpranks/'+str(message.guild.id) + '-users.json', 'w'), indent = 4)
+        if serverxp[str(message.author.id)]["currentxp"] == neededxp:
+          serverxp[str(message.author.id)]["currentlevel"] += 1
+          serverxp[str(message.author.id)]["currentxp"] = 0
+          json.dump(serverxp, open('xpranks/'+str(message.guild.id) + '-users.json', 'w'), indent = 4)
+          if xpsettings["dolevelupmessage"]:
+            channel = None
+            if xpsettings["levelupchannel"]:
+              for channelnum in message.guild.channels:
+                if channelnum.id == xpsettings["levelupchannel"]:
+                  channel = channelnum
+            if not channel:
+              channel = message.channel
+            if xpsettings["levelupmessagetype"] == 'embed':
+              embed = discord.Embed(title = message.author.name + " reached level "+str(serverxp[str(message.author.id)]["currentlevel"]),
+                                    description = "Cheers 🎉🎊", color = embed_color_premium)
+              try:
+                await channel.send(embed = embed)
+              except:
+                pass
+            else:
+              try:
+                await channel.send(message.author.name + " reached level "+str(serverxp[str(message.author.id)]["currentlevel"]))
+              except:
+                pass
+
+
+
+async def xpsystemsetup(interaction, enabled: bool = True):
+  await interaction.response.defer(ephemeral= True)
+  try:
+    xpsettings = json.loads(open('xpranks/'+str(interaction.guild.id) + '-settings.json', 'r').read())
+  except:
+    xpsettings = None
+  if not xpsettings:
+    xpsettings = {
+      "enabled": False,
+      "xppermessage": 1,
+      "xplevelincrement": 120,
+      "xppercallminute": 1,
+      "firstlevelxp": 20,
+      "cardbackground": None,
+      "levelupchannel": None,
+      "dolevelupmessage": True,
+      "levelupmessagetype": "embed",
+      "roleasrank": False
+    }
+  xpsettings['enabled'] = enabled
+  json.dump(xpsettings, open('xpranks/'+str(interaction.guild.id) + '-settings.json', 'w'), indent = 4)
+  status = "enabled" if enabled else "disabled"
+  embed = discord.Embed(title = "XP/Leveling System", description = f"Your leveling system has been successfully {status}.", color = embed_color_success)
+  await interaction.followup.send(embed = embed)
+
         
-      
+    
 
 
-client.run(TOKEN)
+
+async def xpsystemrankcard(interaction, user: discord.User = None):
+  """Get your current xp rank
+
+  Parameters
+  ----------
+  user : discord.User
+      The user to get the rank from"""
+  if not user:
+    user = interaction.user
+  await interaction.response.defer()
+  try:
+    xpsettings = json.loads(open('xpranks/'+str(interaction.guild.id) + '-settings.json', 'r').read())
+  except:
+    xpsettings = None
+  if not xpsettings or not xpsettings['enabled']:
+    return await interaction.followup.send('The XP//Leveling System is disabled on this server.')
+  try:
+    serverxp = json.loads(open('xpranks/'+str(interaction.guild.id)+'-users.json', 'r').read())
+  except:
+    return await interaction.followup.send('Noone sent a message yet.')
+  if not str(user.id) in serverxp.keys():
+    return await interaction.followup.send('Please send a message first.')
+  member = interaction.guild.get_member(user.id)
+  username = user.name
+  currentxp = serverxp[str(user.id)]["currentxp"]
+  lastxp = 0
+  nextxp = xpsettings["firstlevelxp"] + (serverxp[str(user.id)]["currentlevel"] - 1) * xpsettings["xplevelincrement"]
+  current_level = serverxp[str(user.id)]['currentlevel']
+  if xpsettings["roleasrank"]:
+    member = interaction.guild.get_member(user.id)
+    current_rank = member.roles[0].name
+  else:
+    sorted_members = sorted(serverxp.items(), key=lambda x: (x[1]['currentlevel'], x[1]['currentxp']), reverse=True)
+    current_rank = next((index + 1 for index, (member_id, member_data) in enumerate(sorted_members) if member_id == str(user.id)), None)
+  background = xpsettings["cardbackground"]
+    
+  image = await canvacord.rankcard(user = member,
+                                username = username,
+                                currentxp = currentxp,
+                                lastxp = lastxp,
+                                nextxp = nextxp,
+                                level = current_level,
+                                rank = current_rank,
+                                background = background, ranklevelsep = ':', xpsep = '-')
+  file = discord.File(filename = "rankcard.png", fp = image)
+  await interaction.followup.send(file = file)
+
+
+async def xpsystemleaderboard(interaction):
+  await interaction.response.defer()
+  try:
+    xpsettings = json.loads(open('xpranks/'+str(interaction.guild.id) + '-settings.json', 'r').read())
+  except:
+    xpsettings = None
+  if not xpsettings or not xpsettings['enabled']:
+    return await interaction.followup.send('The XP//Leveling System is disabled on this server.')
+  try:
+      serverxp = json.loads(open('xpranks/' + str(interaction.guild.id) + '-users.json', 'r').read())
+  except:
+      return await ctx.send('No one sent a message yet.')
+  sorted_members = sorted(serverxp.items(), key=lambda x: (x[1]['currentlevel'], x[1]['currentxp']), reverse=True)
+  top_25 = sorted_members[:25]
+  embed = discord.Embed(title='XP/Leveling Leaderboard', color = embed_color)
+  for rank, (member_id, member_data) in enumerate(top_25, start=1):
+    member = interaction.guild.get_member(int(member_id))
+    if member:
+      embed.add_field(name = f"#{rank} {member.display_name}", value=f"Level: {member_data['currentlevel']} | XP: {member_data['currentxp']}", inline=False)
+    if interaction.guild.icon:
+      embed.set_thumbnail(url = interaction.guild.icon.url)
+  await interaction.followup.send(embed= embed)
+
+
+
+if __name__ == '__main__':
+  webserver_thread = threading.Thread(target=app.run, kwargs = {'port': 80, 'host': '0.0.0.0'})
+  webserver_thread.start()
+  client.run(TOKEN)
