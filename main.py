@@ -10,8 +10,7 @@ import threading
 from webserver import app
 import canvacord
 import random
-
-
+from colour import Color
 
 
 class Client(discord.Client):
@@ -37,6 +36,15 @@ class Client(discord.Client):
     xpsystem.add_command(app_commands.Command(name = 'leaderboard', description = 'Display the current xp/leveling leaderboard', callback = xpsystemleaderboard))
 
     self.tree.add_command(xpsystem)
+
+    announcements = app_commands.Group(name='announcements', description = 'Announcements for join, leave and ban')
+    announcements_add = app_commands.Command(name = 'add', description = 'Add a new announcement', callback = announcements_add_join)
+    announcements_remove = app_commands.Command(name = 'remove', description = 'Remove an announcement', callback = announcements_remove_join)
+    announcements.add_command(announcements_remove)
+    announcements.add_command(announcements_add)
+
+    self.tree.add_command(announcements)
+
 
     # test = app_commands.Group(name='test', description='Currently in test')
     # test.add_command(app_commands.Command(name = 'rank', description = 'Display your rank card', callback = testRankCard))
@@ -84,7 +92,7 @@ async def ticketsystem_setup_command(interaction, name: str, panel :discord.Text
   member = interaction.guild.get_member(interaction.user.id)
   if str(interaction.guild.id) in staff:
     for role in member.roles:
-      if role.id in staff["moderator"] or role.id in staff["manager"]:
+      if role.id in staff["manager"]:
         isStaff = True
   if member.guild_permissions.administrator or member.id == interaction.guild.owner.id:
     isStaff = True
@@ -190,7 +198,7 @@ async def ticketsystem_resend_command(interaction, name: str, channel: discord.T
       isStaff = True
     else:
       for role in member.roles:
-        if role.id in staff["moderator"] or role.id in staff["manager"]:
+        if role.id in staff["manager"]:
           isStaff = True
   if not isStaff:
     embed = discord.Embed(title="Ticket system", description="You don't have permission to use this command!", color = embed_color_error)
@@ -254,7 +262,7 @@ async def ticketsystem_delete_command(interaction, name: str):
       isStaff = True
     else:
       for role in member.roles:
-        if role.id in staff["moderator"] or role.id in staff["manager"]:
+        if role.id in staff["manager"]:
           isStaff = True
   if not isStaff:
     embed = discord.Embed(title="Ticket system", description="You don't have permission to use this command!", color = embed_color_error)
@@ -380,7 +388,7 @@ async def on_interaction(interaction):
                 filename = f"transcript-{interaction.channel.name}.html",
               )
               for guild in client.guilds:
-                if guild.id == 1173641101542969444:
+                if guild.id == support_server_id:
                   for channel in guild.channels:
                     if channel.id == channel_for_tickets:
                       message = await channel.send(file = transcript_file)
@@ -447,7 +455,7 @@ async def on_interaction(interaction):
 
 @client.event
 async def on_message(message):
-  if message.author.id == client.user.id:
+  if message.author.bot:
     return
   if message.guild:
     try:
@@ -541,13 +549,14 @@ async def xpsystemrankcard(interaction, user: discord.User = None):
   except:
     xpsettings = None
   if not xpsettings or not xpsettings['enabled']:
-    return await interaction.followup.send('The XP//Leveling System is disabled on this server.')
+    embed = discord.Embed(title = "XP/Leveling System", description = "The XP/Leveling System is disabled on this server.", color = embed_color_error)
+    return await interaction.followup.send(embed= embed)
   try:
     serverxp = json.loads(open('xpranks/'+str(interaction.guild.id)+'-users.json', 'r').read())
   except:
-    return await interaction.followup.send('Noone sent a message yet.')
+    serverxp = {}
   if not str(user.id) in serverxp.keys():
-    return await interaction.followup.send('Please send a message first.')
+    serverxp[str(user.id)] = {"currentxp": 0, "currentlevel": 1}
   member = interaction.guild.get_member(user.id)
   username = user.name
   currentxp = serverxp[str(user.id)]["currentxp"]
@@ -585,7 +594,7 @@ async def xpsystemleaderboard(interaction):
   try:
       serverxp = json.loads(open('xpranks/' + str(interaction.guild.id) + '-users.json', 'r').read())
   except:
-      return await ctx.send('No one sent a message yet.')
+      return await interaction.followup.send('No leaderboard found on this server')
   sorted_members = sorted(serverxp.items(), key=lambda x: (x[1]['currentlevel'], x[1]['currentxp']), reverse=True)
   top_25 = sorted_members[:25]
   embed = discord.Embed(title='XP/Leveling Leaderboard', color = embed_color)
@@ -597,6 +606,405 @@ async def xpsystemleaderboard(interaction):
       embed.set_thumbnail(url = interaction.guild.icon.url)
   await interaction.followup.send(embed= embed)
 
+@client.event
+async def on_member_join(member):
+  announcements = json.loads(open('announcements.json', 'r').read())
+  if not str(member.guild.id) in announcements:
+    announcements[str(member.guild.id)] = []
+  for announcement in announcements[str(member.guild.id)]:
+    try:
+      if announcement["action"]== "join":
+        if announcement["type"] == "banner":
+          for l in ["banner_avatarcolor", "banner_textcolor"]:
+            try:
+              Color(announcement[l])
+            except:
+              announcement[l] = 'white'
+          try:
+            background_color = Color(announcement['banner_background'])
+            background = None
+          except:
+            background_color = 'black'
+            background = announcement['banner_background']
+          image = await canvacord.welcomecard(user = member,
+                                              background = background,
+                                              avatarcolor = announcement['banner_avatarcolor'],
+                                              topcolor = announcement['banner_textcolor'],
+                                              bottomcolor=announcement['banner_textcolor'],
+                                              backgroundcolor=background_color,
+                                              font=None,
+                                              toptext=announcement['banner_toptext'],
+                                              bottomtext=announcement['banner_bottomtext'])
+          file = discord.File(filename = 'welcome.png', fp = image)
+          for channel in member.guild.channels:
+            if channel.id == announcement["channel"]:
+              await channel.send(file = file)
+        if announcement["type"] == "embed":
+          try:
+            join_embed_color = Color(n[0]['embed_color']).hex_l
+          except:
+            join_embed_color = Color('white').hex_l
+          join_embed_color = int(join_embed_color.replace('#',''), 16)
+          embed = discord.Embed(title = announcement["embed_title"].replace("{server}", member.guild.name).replace("{user_name}", member.name),
+                                description = announcement["embed_description"].replace("{server}", member.guild.name).replace("{user_name}", member.name),
+                                color = join_embed_color)
+          for channel in member.guild.channels:
+            if channel.id == announcement["channel"]:
+              await channel.send(embed = embed)
+        if announcement["type"] == "text":
+          for channel in member.guild.channels:
+            if channel.id == announcement["channel"]:
+              await channel.send(announcement["text_message"].replace("{server}", member.guild.name).replace("{user_name}", member.name))
+    except:
+      pass
+
+
+
+
+@client.event
+async def on_member_remove(member):
+  announcements = json.loads(open('announcements.json', 'r').read())
+  if not str(member.guild.id) in announcements:
+    announcements[str(member.guild.id)] = []
+  for announcement in announcements[str(member.guild.id)]:
+    try:
+      if announcement["action"]== "leave":
+        if announcement["type"] == "banner":
+          for l in ["banner_avatarcolor", "banner_textcolor"]:
+            try:
+              Color(announcement[l])
+            except:
+              announcement[l] = 'white'
+          try:
+            background_color = Color(announcement['banner_background'])
+            background = None
+          except:
+            background_color = 'black'
+            background = announcement['banner_background']
+          image = await canvacord.welcomecard(user = member,
+                                              background = background,
+                                              avatarcolor = announcement['banner_avatarcolor'],
+                                              topcolor = announcement['banner_textcolor'],
+                                              bottomcolor=announcement['banner_textcolor'],
+                                              backgroundcolor=background_color,
+                                              font=None,
+                                              toptext=announcement['banner_toptext'],
+                                              bottomtext=announcement['banner_bottomtext'])
+          file = discord.File(filename = 'welcome.png', fp = image)
+          for channel in member.guild.channels:
+            if channel.id == announcement["channel"]:
+              await channel.send(file = file)
+        if announcement["type"] == "embed":
+          try:
+            join_embed_color = Color(n[0]['embed_color']).hex_l
+          except:
+            join_embed_color = Color('white').hex_l
+          join_embed_color = int(join_embed_color.replace('#',''), 16)
+          embed = discord.Embed(title = announcement["embed_title"].replace("{server}", member.guild.name).replace("{user_name}", member.name),
+                                description = announcement["embed_description"].replace("{server}", member.guild.name).replace("{user_name}", member.name),
+                                color = join_embed_color)
+          for channel in member.guild.channels:
+            if channel.id == announcement["channel"]:
+              await channel.send(embed = embed)
+        if announcement["type"] == "text":
+          for channel in member.guild.channels:
+            if channel.id == announcement["channel"]:
+              await channel.send(announcement["text_message"].replace("{server}", member.guild.name).replace("{user_name}", member.name))
+    except:
+      pass
+
+
+
+
+async def complete_announcement_label(interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
+  announcements = json.loads(open('announcements.json', 'r').read())
+  n = [i for i in announcements[str(interaction.guild.id)] if current in i["label"]]
+  guild_id = interaction.guild.id
+  return [app_commands.Choice(name = s["label"], value = s["label"]) for s in n]
+
+@app_commands.autocomplete(label = complete_announcement_label)
+async def announcements_remove_join(interaction, label: str):
+  """Remove an announcement
+
+  Parameters
+  ----------
+  label : str
+      The label of the announcement to remove"""
+  await interaction.response.defer(ephemeral = True)
+  staff = json.loads(open('staff.json', 'r').read())
+  if not interaction.guild:
+    embed = discord.Embed(title="Announcements", description="This command can only be used in a server!", color = embed_color_error)
+    await interaction.followup.send(embed = embed)
+    return
+  isStaff = False
+  member = interaction.guild.get_member(interaction.user.id)
+  if str(interaction.guild.id) in staff:
+    for role in member.roles:
+      if role.id in staff[str(interaction.guild.id)]["manager"]:
+        isStaff = True
+  if member.guild_permissions.administrator or member.id == interaction.guild.owner.id:
+    isStaff = True
+  if not isStaff:
+    embed = discord.Embed(title="Announcements", description="You don't have permission to use this command!", color = embed_color_error)
+    await interaction.followup.send(embed = embed)
+    return
+  announcements = json.loads(open('announcements.json', 'r').read())
+  if not str(member.guild.id) in announcements:
+    announcements[str(member.guild.id)] = []
+  for n in announcements[str(member.guild.id)]:
+    if n["label"] == label:
+      announcements[str(member.guild.id)].remove(n)
+  json.dump(announcements, open('announcements.json', 'w'), indent = 4)
+  embed = discord.Embed(title="Announcements", description="The announcement with the label "+label+" got deleted.", color = embed_color_success)
+  await interaction.followup.send(embed=embed)
+
+
+@app_commands.choices(announcement_type = [
+  app_commands.Choice(name="Banner", value="banner"),
+  app_commands.Choice(name="Embed", value="embed"),
+  app_commands.Choice(name="Text", value="text")
+])
+@app_commands.choices(action = [
+  app_commands.Choice(name="Join", value="join"),
+  app_commands.Choice(name="Leave", value="leave")
+])
+async def announcements_add_join(interaction, label: str, channel: discord.TextChannel, announcement_type: str, action: str):
+  """Add a new announcement
+
+  Parameters
+  ----------
+  label : str
+      Label this announcement
+  channel : discord.TextChannel
+      The channel to send the join announcement to
+  announcement_type : str
+      The type of the announcement to send
+  action : str
+      The event when this announcement shall be sent"""
+  await interaction.response.defer(ephemeral = True)
+  staff = json.loads(open('staff.json', 'r').read())
+  if not interaction.guild:
+    embed = discord.Embed(title="Announcements", description="This command can only be used in a server!", color = embed_color_error)
+    await interaction.followup.send(embed = embed)
+    return
+  isStaff = False
+  member = interaction.guild.get_member(interaction.user.id)
+  if str(interaction.guild.id) in staff:
+    for role in member.roles:
+      if role.id in staff[str(interaction.guild.id)]["manager"]:
+        isStaff = True
+  if member.guild_permissions.administrator or member.id == interaction.guild.owner.id:
+    isStaff = True
+  if not isStaff:
+    embed = discord.Embed(title="Announcements", description="You don't have permission to use this command!", color = embed_color_error)
+    await interaction.followup.send(embed = embed)
+    return
+  announcements = json.loads(open('announcements.json', 'r').read())
+  if not str(member.guild.id) in announcements:
+    announcements[str(member.guild.id)] = []
+  n = [i for i in announcements[str(member.guild.id)] if i["label"] == label]
+  if len(n) !=0:
+    embed = discord.Embed(title="Announcements", description="An announcement with this label already exists in this server!", color = embed_color_error)
+    await interaction.followup.send(embed = embed)
+    return
+  if action == 'join':
+    announcements[str(member.guild.id)].append({
+      "type": announcement_type,
+      "text_message": "Welcome {user_name}\nEnjoy your stay in {server}!",
+      "embed_color": "purple",
+      "embed_title": "Welcome {user_name}",
+      "embed_description": "Enjoy your stay in {server}!",
+      "banner_background": "black",
+      "banner_avatarcolor": "white",
+      "banner_textcolor": "white",
+      "banner_toptext": "Welcome {user_name}",
+      "banner_bottomtext": "Enjoy your stay in {server}!",
+      "channel": channel.id,
+      "label": label,
+      "action": action
+    })
+  if action == 'leave':
+    announcements[str(member.guild.id)].append({
+      "type": announcement_type,
+      "text_message": "{user_name} left {server} 👋",
+      "embed_color": "purple",
+      "embed_title": "{user_name} left",
+      "embed_description": "{server} will miss you.",
+      "banner_background": "black",
+      "banner_avatarcolor": "white",
+      "banner_textcolor": "white",
+      "banner_toptext": "{user_name} left",
+      "banner_bottomtext": "{server} will miss you.",
+      "channel": channel.id,
+      "label": label,
+      "action": action
+    })
+    
+  json.dump(announcements, open('announcements.json', 'w'), indent = 4)
+  n = [i for i in announcements[str(member.guild.id)] if i["label"] == label]
+  if announcement_type == 'banner':
+    for l in ["banner_avatarcolor", "banner_textcolor"]:
+      try:
+        Color(n[0][l])
+      except:
+        n[0][l] = 'white'
+    try:
+      background_color = Color(n[0]['banner_background'])
+      background = None
+    except:
+      background_color = 'black'
+      background = n[0]['banner_background']
+    image = await canvacord.welcomecard(user = member,
+                                        background = background,
+                                        avatarcolor = n[0]['banner_avatarcolor'],
+                                        topcolor = n[0]['banner_textcolor'],
+                                        bottomcolor=n[0]['banner_textcolor'],
+                                        backgroundcolor=background_color,
+                                        font=None,
+                                        toptext=n[0]['banner_toptext'],
+                                        bottomtext=n[0]['banner_bottomtext'])
+    file = discord.File(filename='welcome.png', fp=image)
+    class JoinAnnouncementBannerEditView(ui.View):
+      def __init__(self, member, label):
+        super().__init__(timeout = None)
+        self.member = member
+        self.label = label
+      @ui.button(label = "Edit banner", style = discord.ButtonStyle.green)
+      async def edit_banner(self, interaction, button):
+        class EditColorsModal(ui.Modal, title='Edit banner'):
+          announcements = json.loads(open('announcements.json', 'r').read())
+          n = [i for i in announcements[str(member.guild.id)] if i["label"] == label][0]
+          background = ui.TextInput(label = 'Background', default = n["banner_background"])
+          avatarcolor = ui.TextInput(label = 'Avatar color', default = n["banner_avatarcolor"])
+          textcolor = ui.TextInput(label = 'Text color', default = n["banner_textcolor"])
+          toptext = ui.TextInput(label = 'Top line', default = n["banner_toptext"])
+          bottomtext = ui.TextInput(label = 'Bottom line', default = n["banner_bottomtext"])
+          def __init__(self, member, label):
+            super().__init__(timeout = None)
+            self.label = label
+            self.member = member
+
+          async def on_submit(self, interaction):
+            await interaction.response.defer(ephemeral=True)
+            announcements = json.loads(open('announcements.json', 'r').read())
+            n = next((index for index, announcement in enumerate(announcements[str(member.guild.id)]) if announcement["label"] == label), None)
+            announcements[str(member.guild.id)][n]['banner_background'] = self.background.value
+            announcements[str(member.guild.id)][n]['banner_avatarcolor'] = self.avatarcolor.value
+            announcements[str(member.guild.id)][n]['banner_textcolor'] = self.textcolor.value
+            announcements[str(member.guild.id)][n]['banner_toptext'] = self.toptext.value
+            announcements[str(member.guild.id)][n]['banner_bottomtext'] = self.bottomtext.value
+            for l in ["banner_avatarcolor", "banner_textcolor"]:
+              try:
+                Color(announcements[str(member.guild.id)][n][l])
+              except:
+                announcements[str(member.guild.id)][n][l] = 'white'
+            json.dump(announcements, open('announcements.json', 'w'), indent = 4)
+            n = [i for i in announcements[str(member.guild.id)] if i["label"] == label]
+            try:
+              background_color = Color(n[0]['banner_background'])
+              background = None
+            except:
+              background_color = 'black'
+              background = n[0]['banner_background']
+            image = await canvacord.welcomecard(user = self.member,
+                                                background = background,
+                                                avatarcolor = n[0]['banner_avatarcolor'],
+                                                topcolor = n[0]['banner_textcolor'],
+                                                bottomcolor=n[0]['banner_textcolor'],
+                                                backgroundcolor=background_color,
+                                                font=None,
+                                                toptext=n[0]['banner_toptext'],
+                                                bottomtext=n[0]['banner_bottomtext'])
+            file = discord.File(filename='welcome.png', fp=image)
+            await interaction.followup.send(content = "Saved banner: ", file = file, view = JoinAnnouncementBannerEditView(member = self.member, label = self.label), ephemeral = True)
+            
+          
+        await interaction.response.send_modal(EditColorsModal(member = self.member, label = self.label))
+
+
+    await interaction.followup.send(content = "Saved banner: ", file = file, view = JoinAnnouncementBannerEditView(member = member, label = label))
+  elif announcement_type == 'embed':
+    try:
+      join_embed_color = Color(n[0]['embed_color']).hex_l
+    except:
+      join_embed_color = Color('white').hex_l
+    join_embed_color = int(join_embed_color.replace('#',''), 16)
+    embed = discord.Embed(title = n[0]["embed_title"].replace("{server}", interaction.guild.name).replace("{user_name}", member.name),
+                          description = n[0]["embed_description"].replace("{server}", interaction.guild.name).replace("{user_name}", member.name),
+                          color = join_embed_color)
+    if member.avatar:
+      embed.set_thumbnail(url = member.avatar.url)
+    class JoinAnnouncementEmbedEditView(ui.View):
+      def __init__(self, member, label):
+        super().__init__(timeout = None)
+        self.member = member
+        self.label = label
+      @ui.button(label = "Edit embed", style = discord.ButtonStyle.green)
+      async def edit_banner(self, interaction, button):
+        class EditColorsModal(ui.Modal, title='Edit embed'):
+          announcements = json.loads(open('announcements.json', 'r').read())
+          n = [i for i in announcements[str(member.guild.id)] if i["label"] == label][0]
+          color = ui.TextInput(label = 'Color', default = n["embed_color"])
+          etitle = ui.TextInput(label = 'Title', default = n["embed_title"])
+          description = ui.TextInput(label = 'Description', default = n["embed_description"], style=discord.TextStyle.long)
+          def __init__(self, member, label):
+            super().__init__(timeout = None)
+            self.label = label
+            self.member = member
+
+          async def on_submit(self, interaction):
+            await interaction.response.defer(ephemeral=True)
+            announcements = json.loads(open('announcements.json', 'r').read())
+            n = next((index for index, announcement in enumerate(announcements[str(member.guild.id)]) if announcement["label"] == label), None)
+            announcements[str(member.guild.id)][n]['embed_color'] = self.color.value
+            announcements[str(member.guild.id)][n]['embed_title'] = self.etitle.value
+            announcements[str(member.guild.id)][n]['embed_description'] = self.description.value
+            try:
+              join_embed_color = Color(announcements[str(member.guild.id)][n]['embed_color']).hex_l
+              print(join_embed_color)
+            except:
+              join_embed_color = Color('white').hex_l
+            join_embed_color = int(join_embed_color.replace('#',''), 16)
+            json.dump(announcements, open('announcements.json', 'w'), indent = 4)
+            n = [i for i in announcements[str(member.guild.id)] if i["label"] == label]
+            embed = discord.Embed(title = n[0]["embed_title"].replace("{server}", interaction.guild.name).replace("{user_name}", member.name),
+                                  description = n[0]["embed_description"].replace("{server}", interaction.guild.name).replace("{user_name}", member.name),
+                                  color = join_embed_color)
+            if member.avatar:
+              embed.set_thumbnail(url = member.avatar.url)
+            await interaction.followup.send(content = 'Saved embed: ', embed = embed, view = JoinAnnouncementEmbedEditView(member = self.member, label = self.label), ephemeral = True)
+        await interaction.response.send_modal(EditColorsModal(member = self.member, label = self.label))
+    await interaction.followup.send(content = 'Saved embed: ', embed = embed, view = JoinAnnouncementEmbedEditView(member = member, label = label))
+  else:
+    class JoinAnnouncementTextEditView(ui.View):
+      def __init__(self, member, label):
+        super().__init__(timeout = None)
+        self.member = member
+        self.label = label
+      @ui.button(label = "Edit text", style = discord.ButtonStyle.green)
+      async def edit_banner(self, interaction, button):
+        class EditColorsModal(ui.Modal, title='Edit text'):
+          announcements = json.loads(open('announcements.json', 'r').read())
+          n = [i for i in announcements[str(member.guild.id)] if i["label"] == label][0]
+          message = ui.TextInput(label = 'Message', default = n["text_message"], style=discord.TextStyle.long)
+          def __init__(self, member, label):
+            super().__init__(timeout = None)
+            self.label = label
+            self.member = member
+
+          async def on_submit(self, interaction):
+            await interaction.response.defer(ephemeral=True)
+            announcements = json.loads(open('announcements.json', 'r').read())
+            n = next((index for index, announcement in enumerate(announcements[str(member.guild.id)]) if announcement["label"] == label), None)
+            announcements[str(member.guild.id)][n]['text_message'] = self.message.value
+            json.dump(announcements, open('announcements.json', 'w'), indent = 4)
+            n = [i for i in announcements[str(member.guild.id)] if i["label"] == label]
+            await interaction.followup.send(content = "Saved text: \n\n"+n[0]['text_message'].replace("{server}", interaction.guild.name).replace("{user_name}", member.name), view = JoinAnnouncementTextEditView(member = self.member, label = self.label), ephemeral = True)
+            
+          
+        await interaction.response.send_modal(EditColorsModal(member = self.member, label = self.label))
+    await interaction.followup.send(content = 'Saved text: \n\n'+n[0]['text_message'].replace("{server}", interaction.guild.name).replace("{user_name}", member.name), view = JoinAnnouncementTextEditView(member = member, label = label))
+    
 
 
 if __name__ == '__main__':
